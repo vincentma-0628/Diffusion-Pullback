@@ -2,7 +2,7 @@
 
 for t in 0.7 0.6
     do
-    for sample_idx in 2 3 1 0
+    for sample_idx in 0
         do
         python main.py \
             --sh_file_name                          main_various_local_encoder_pullback_without_edit_prompt.sh   \

@@ -229,16 +229,21 @@ class EditStableDiffusion(object):
             u = torch.load(u_path, map_location=self.device).type(self.dtype)
             vT = torch.load(vT_path, map_location=self.device).type(self.dtype)
             
+
+
+
         # computed local basis
         else:
             print('!!!RUN LOCAL PULLBACK!!!')
             # zt, t, t_idx = self.DDIMforwardsteps(zT, t_start_idx=0, t_end_idx=self.edit_t_idx)
             u, s, vT = self.unet.local_encoder_pullback_zt(
                 sample=zt, timestep=t, encoder_hidden_states=self.edit_prompt_emb, op=op, block_idx=block_idx, 
-                pca_rank=pca_rank, chunk_size=5, min_iter=10, max_iter=50, convergence_threshold=1e-4,
+                pca_rank=2, chunk_size=5, min_iter=10, max_iter=50, convergence_threshold=1e-4,
             )
 
             vT = vT.to(device=self.device, dtype=self.dtype)
+            
+            print(f'{vT.shape} print 1')
 
             # save semantic direction in h-space
             torch.save(u, u_path)
@@ -266,20 +271,25 @@ class EditStableDiffusion(object):
 
         u = u / u.norm(dim=0, keepdim=True)
         vT = vT / vT.norm(dim=1, keepdim=True)
+        
+
+        ####ADDED BY JR 
+        print(f'{vT.shape} print 2')
 
         # original_zt, _, _ = self.DDIMforwardsteps(
         #     zT, t_start_idx=0, t_end_idx=self.edit_t_idx, guidance=None,
         #     vis_psd=False, return_latents=True, save_image='image',
         # )
-
+        
+        vk_list = []
         original_zt = zt.clone()
         for pc_idx in range(vis_num_pc):
             for direction in [1, -1]: # +v, -v
                 # declare experiment name
                 if direction == 1:
-                    self.EXP_NAME = f'Edit_zt-{self.dataset_name}_{idx}-edit_{self.edit_t}T-{op}-block_{block_idx}-pc_{pc_idx:0=3d}_pos-edit_prompt_{self.edit_prompt}'
+                    self.EXP_NAME = f'Edit_zt-{self.dataset_name}_{idx}-edit_{self.edit_t}T-{op}-block_{block_idx}-pc_{pc_idx:0=3d}_pos-edit_prompt_{self.edit_prompt}_multiple'
                 elif direction == -1:
-                    self.EXP_NAME = f'Edit_zt-{self.dataset_name}_{idx}-edit_{self.edit_t}T-{op}-block_{block_idx}-pc_{pc_idx:0=3d}_neg-edit_prompt_{self.edit_prompt}'
+                    self.EXP_NAME = f'Edit_zt-{self.dataset_name}_{idx}-edit_{self.edit_t}T-{op}-block_{block_idx}-pc_{pc_idx:0=3d}_neg-edit_prompt_{self.edit_prompt}_multiple'
 
                 # skip experiment if already done
                 if os.path.exists(os.path.join(self.result_folder, self.EXP_NAME + '.png')):
@@ -288,23 +298,38 @@ class EditStableDiffusion(object):
                     continue
 
                 vk = direction*vT[pc_idx, :].view(-1, *zT.shape[1:])
-
+                vk_list.append(vk)
                 # edit zt along vk direction with **x-space guidance**
-                zt_list = [original_zt.clone()]
-                for _ in tqdm(range(self.x_space_guidance_num_step), desc='x_space_guidance edit'):
-                    zt_edit = self.x_space_guidance(
-                        zt_list[-1], t_idx=self.edit_t_idx, vk=vk, 
-                        single_edit_step=self.x_space_guidance_edit_step,
-                        use_edit_prompt=self.x_space_guidance_use_edit_prompt,
-                    )
-                    zt_list.append(zt_edit)
-                zt = torch.cat(zt_list, dim=0)
-                zt = zt[::(zt.size(0) // vis_num)]
+                #zt_list = [original_zt.clone()]
+                #for _ in tqdm(range(self.x_space_guidance_num_step), desc='x_space_guidance edit'):
+                    #zt_edit = self.x_space_guidance(
+                        #zt_list[-1], t_idx=self.edit_t_idx, vk=vk, 
+                        #single_edit_step=self.x_space_guidance_edit_step,
+                        #use_edit_prompt=self.x_space_guidance_use_edit_prompt,
+                    #)
+                    #zt_list.append(zt_edit)
+                #zt = torch.cat(zt_list, dim=0)
+                #zt = zt[::(zt.size(0) // vis_num)]
 
                 # zt -> z0
-                self.DDIMforwardsteps(
-                    zt, t_start_idx=self.edit_t_idx, t_end_idx=-1,
-                )
+                #self.DDIMforwardsteps(
+                    #zt, t_start_idx=self.edit_t_idx, t_end_idx=-1,
+                #)
+        zt_list = [original_zt.clone()]
+        for _ in tqdm(range(self.x_space_guidance_num_step), desc='x_space_guidance edit'):
+            zt_edit = self.x_space_guidance_multiple(
+                zt_list[-1], t_idx=self.edit_t_idx, vk=vk_list, 
+                single_edit_step=self.x_space_guidance_edit_step,
+                use_edit_prompt=self.x_space_guidance_use_edit_prompt,
+            )
+            zt_list.append(zt_edit)
+        zt = torch.cat(zt_list, dim=0)
+        zt = zt[::(zt.size(0) // vis_num)]
+
+        # zt -> z0
+        self.DDIMforwardsteps(
+            zt, t_start_idx=self.edit_t_idx, t_end_idx=-1,
+        )
 
     @torch.no_grad()
     def run_sample_encoder_local_tangent_space_zt(
@@ -351,10 +376,13 @@ class EditStableDiffusion(object):
             zt, t, _ = self.DDIMforwardsteps(zT, t_start_idx=0, t_end_idx=h_t_idx)
             zt = zt.to(self.device)
 
-            u, s, vT = self.unet.local_encoder_pullback_zt(
+            u, s, vT, v = self.unet.local_encoder_pullback_zt(
                 sample=zt, timestep=t, encoder_hidden_states=self.edit_prompt_emb, op=op, block_idx=block_idx, 
-                pca_rank=pca_rank, chunk_size=5, min_iter=10, max_iter=50, convergence_threshold=1e-3,
+                pca_rank=50, chunk_size=5, min_iter=10, max_iter=50, convergence_threshold=1e-3,
             )
+
+            ####added by jr#####
+            
 
             if vis_vT:
                 pca_vT = vT.view(-1, *zT.shape[1:]).permute(0, 2, 3, 1)
@@ -487,11 +515,37 @@ class EditStableDiffusion(object):
         t = self.scheduler.timesteps[t_idx]
 
         # edit zt with vk
+        ####X Guidance####
         zt_edit = zt + single_edit_step * vk
+        
 
         # predict the noise residual
         et = self.unet(
             torch.cat([zt, zt_edit], dim=0), t, 
+            encoder_hidden_states=self.edit_prompt_emb.repeat(2, 1, 1)
+            # cross_attention_kwargs=None,
+        ).sample
+
+        # DDS regularization
+        et_null, et_edit = et.chunk(2)
+        zt_edit = zt + self.x_space_guidance_scale * (et_edit - et_null)
+        return zt_edit
+
+
+#####TODO implement logic for noise prediction
+    @torch.no_grad()
+    def x_space_guidance_multiple(self, zt, t_idx, vk, single_edit_step, use_edit_prompt=False):
+        # necesary parameters
+        t = self.scheduler.timesteps[t_idx]
+
+        # edit zt with vk
+        print(f'this is single edit step {single_edit_step}')
+        zt_edit = zt + (.5 * vk[0]) + (single_edit_step *  vk[1])
+        
+
+        # predict the noise residual
+        et = self.unet(
+            torch.cat([zt, zt_edit], dim=0), t,
             encoder_hidden_states=self.edit_prompt_emb.repeat(2, 1, 1)
             # cross_attention_kwargs=None,
         ).sample
@@ -722,7 +776,7 @@ class EditUncondDiffusion(object):
         else:
             print('!!!RUN LOCAL PULLBACK!!!')
             xt = xt.to(device=self.device, dtype=self.dtype)
-            u, s, vT = self.unet.local_encoder_pullback_xt(
+            u, s, vT, v = self.unet.local_encoder_pullback_xt(
                 x=xt, t=t, op=op, block_idx=block_idx, pca_rank=pca_rank, 
                 min_iter=10, max_iter=50, convergence_threshold=1e-4,
             )
@@ -1043,7 +1097,7 @@ class EditUncondDiffusion(object):
                     xt, t, _ = self.DDIMforwardsteps(xT, t_start_idx=0, t_end_idx=self.h_t_idx)
                     xt = xt.to(dtype=self.dtype, device=self.device)
 
-                    u, s, vT = self.unet.local_encoder_pullback_xt(
+                    u, s, vT, v = self.unet.local_encoder_pullback_xt(
                         x=xt, t=t, op=op, block_idx=block_idx, pca_rank=pca_rank,
                         min_iter=10, max_iter=50, convergence_threshold=1e-4,
                     )
@@ -1118,7 +1172,7 @@ class EditUncondDiffusion(object):
             vT_path = os.path.join(save_dir, 'vT-' + SAMPLE_EXP_NAME + '.pt')
             
             xt = xt.to(device=self.device, dtype=self.dtype)
-            u, s, vT = self.unet.local_encoder_pullback_xt(
+            u, s, vT, v = self.unet.local_encoder_pullback_xt(
                 x=xt, t=t, op=op, block_idx=block_idx, pca_rank=pca_rank, 
                 min_iter=10, max_iter=50, convergence_threshold=1e-4,
             )

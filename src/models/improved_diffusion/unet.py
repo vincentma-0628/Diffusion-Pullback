@@ -591,6 +591,7 @@ class UNetModel(nn.Module):
         vT = th.randn(c_i*w_i*h_i, pca_rank, device=x.device)
         vT, _ = th.linalg.qr(vT)
         v = vT.T
+        print(f'{v.shape} print 1')
         v = v.view(-1, c_i, w_i, h_i)
 
         for i in range(max_iter):
@@ -634,6 +635,7 @@ class UNetModel(nn.Module):
                 print('last convergence : ', convergence)
 
         u, s, vT = u.view(-1, c_o*w_o*h_o).T.detach(), s.sqrt().detach(), v.view(-1, c_i*w_i*h_i).detach()
+        # return u, s, vT, v
         return u, s, vT
 
 

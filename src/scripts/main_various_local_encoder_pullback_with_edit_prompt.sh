@@ -1,8 +1,8 @@
-for t in 0.7 0.6
+for t in 0.7
     do
-    for sample_idx in 5
+    for sample_idx in 0
         do
-        for edit_prompt in "sitting dog" "tiger"
+        for edit_prompt in "curly hair"
             do
             python main.py \
                 --sh_file_name                          main_various_local_encoder_pullback_with_edit_prompt.sh   \
