@@ -1,4 +1,4 @@
-for t in 0.7
+for t in 0.99 0.7 0.01
     do
     for sample_idx in 0
         do

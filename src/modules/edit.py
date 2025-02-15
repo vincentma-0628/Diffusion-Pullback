@@ -263,6 +263,7 @@ class EditStableDiffusion(object):
 
             vis_vT = vis_vT - vis_vT.min()
             vis_vT = vis_vT / vis_vT.max()
+            vis_vT = vis_vT / vis_vT.max()
             tvu.save_image(
                 vis_vT, os.path.join(self.obs_folder, f'vT-{local_basis_name}.png')
             )
@@ -539,20 +540,29 @@ class EditStableDiffusion(object):
         t = self.scheduler.timesteps[t_idx]
 
         # edit zt with vk
-        print(f'this is single edit step {single_edit_step}')
-        zt_edit = zt + (.5 * vk[0]) + (single_edit_step *  vk[1])
-        
+        print(f'This is Basis 1 negative, Basis 2 neg')
+        # zt_edit = zt + (.5 * vk[0]) + (single_edit_step *  vk[1])
+        # For vk, vk[0] and vk[1] are the basis 1, positive and negative.
+        zt_edit_1 = zt + 1 * vk[1]
+        zt_edit_2 = zt + 1 * vk[3]
 
         # predict the noise residual
-        et = self.unet(
-            torch.cat([zt, zt_edit], dim=0), t,
+        et_1 = self.unet(
+            torch.cat([zt, zt_edit_1], dim=0), t,
+            encoder_hidden_states=self.edit_prompt_emb.repeat(2, 1, 1)
+            # cross_attention_kwargs=None,
+        ).sample
+        et_2 = self.unet(
+            torch.cat([zt, zt_edit_2], dim=0), t,
             encoder_hidden_states=self.edit_prompt_emb.repeat(2, 1, 1)
             # cross_attention_kwargs=None,
         ).sample
 
         # DDS regularization
-        et_null, et_edit = et.chunk(2)
-        zt_edit = zt + self.x_space_guidance_scale * (et_edit - et_null)
+        et_null_1, et_edit_1 = et_1.chunk(2)
+        et_null_2, et_edit_2 = et_2.chunk(2)
+        scale = self.x_space_guidance_scale
+        zt_edit = zt + 1 * (et_edit_1 - et_null_1) + 100 * (et_edit_2 - et_null_2)
         return zt_edit
 
     # utils
